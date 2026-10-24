@@ -121,7 +121,8 @@ def _index(folder, skip=SKIP_DIRS):
     for root, dirs, names in os.walk(folder):
         dirs[:] = [d for d in dirs if d not in skip and not d.startswith('.')]
         for n in names:
-            found.setdefault(unicodedata.normalize('NFC', n), os.path.join(root, n))
+            if not n.startswith('.'):  # .DS_Store, ._ AppleDouble files
+                found.setdefault(unicodedata.normalize('NFC', n), os.path.join(root, n))
     return found
 
 
@@ -169,8 +170,7 @@ def scan(ptx_path, extra_dirs=()):
             raise ValueError('no audio files listed')
     except (ValueError, struct.error):
         audio_dir = os.path.join(session_dir, 'Audio Files')
-        allf = _index(audio_dir) if os.path.isdir(audio_dir) else {}
-        return {k: v for k, v in allf.items() if not k.startswith('.')}, [], False
+        return _index(audio_dir) if os.path.isdir(audio_dir) else {}, [], False
     found, missing = resolve(session_dir, files, session_parts, extra_dirs)
     return found, missing, True
 
@@ -182,15 +182,18 @@ def build_zip(ptx_path, found, out_path, progress=lambda done, total: None):
     items = [(ptx_path, f'{top}/{os.path.basename(ptx_path)}')]
     items += [(p, f'{top}/Audio Files/{name}') for name, p in sorted(found.items())]
     bounced = os.path.join(session_dir, 'Bounced Files')
-    for rel_name, p in sorted(_index(bounced, skip=()).items()) if os.path.isdir(bounced) else []:
-        rel = os.path.relpath(p, bounced).replace(os.sep, '/')
-        items.append((p, f'{top}/Bounced Files/{rel}'))
+    for root, dirs, names in os.walk(bounced):
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for n in sorted(names):
+            if not n.startswith('.'):
+                rel = os.path.relpath(os.path.join(root, n), bounced).replace(os.sep, '/')
+                items.append((os.path.join(root, n), f'{top}/Bounced Files/{rel}'))
     total = sum(os.path.getsize(p) for p, _ in items) or 1
     done, tmp = 0, out_path + '.part'
     try:
         with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_STORED, allowZip64=True) as z:
             for src, arc in items:
-                with open(src, 'rb') as fi, z.open(arc, 'w', force_zip64=True) as fo:
+                with open(src, 'rb') as fi, z.open(zipfile.ZipInfo.from_file(src, arc), 'w', force_zip64=True) as fo:
                     while chunk := fi.read(1 << 20):
                         fo.write(chunk)
                         done += len(chunk)

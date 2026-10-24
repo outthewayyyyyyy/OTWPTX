@@ -4,3 +4,4 @@ dist/
 *.spec
 *.part
 .DS_Store
+.venv/
