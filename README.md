@@ -15,10 +15,9 @@ If audio files are missing, the app lists them and lets the user point to a fold
 
 ## Building the installers
 
-The workflow is **manual only**. Pushing commits never starts a build, so you're only charged when you start one.
+Every push to `main` builds both installers and publishes them as a GitHub Release (version `0.1.<build number>`). Pushes to other branches never build, so do your work on a branch and merge it into `main` when it is ready to release.
 
-1. GitHub → **Actions** → **Build installers** → **Run workflow**.
-2. Enter a version (e.g. `1.0.0`). Tick **Publish a GitHub Release** to attach the installers to a Release; leave it unticked to download them from the run page only (under *Artifacts*).
+To build without merging, go to GitHub → **Actions** → **Build installers** → **Run workflow** and pick a branch (optionally tick **Publish a GitHub Release**).
 
 Cost: a run takes about 5 min on macOS and 4 min on Windows. On a private repo, GitHub bills macOS minutes at 10× and Windows at 2× against your free monthly minutes.
 
