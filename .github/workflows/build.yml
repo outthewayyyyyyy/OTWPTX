@@ -44,12 +44,6 @@ jobs:
 
   macos:
     runs-on: macos-15
-    env:
-      APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
-      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - name: Install universal2 Python from python.org
@@ -67,25 +61,8 @@ jobs:
           plutil -replace CFBundleShortVersionString -string "$VERSION" "$P"
           plutil -replace CFBundleVersion -string "$VERSION" "$P"
           plutil -insert CFBundleDocumentTypes -json '[{"CFBundleTypeName":"Pro Tools Session","CFBundleTypeRole":"Viewer","CFBundleTypeExtensions":["ptx"]}]' "$P"
+          codesign --force --deep --sign - "dist/OTW PTX.app"
           lipo -archs "dist/OTW PTX.app/Contents/MacOS/OTW PTX"
-      - name: Sign app
-        if: env.APPLE_CERT_P12_BASE64 != ''
-        run: |
-          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > cert.p12
-          security create-keychain -p ci build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p ci build.keychain
-          security set-keychain-settings -lut 21600 build.keychain
-          security import cert.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci build.keychain
-          ID=$(security find-identity -v -p codesigning build.keychain | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"')
-          echo "SIGN_ID=$ID" >> $GITHUB_ENV
-          APP="dist/OTW PTX.app"
-          # sign every library inside first, then the app itself
-          find "$APP" -type f \( -name '*.dylib' -o -name '*.so' \) -exec \
-            codesign --force --timestamp --options runtime --sign "$ID" {} \;
-          codesign --force --timestamp --options runtime --entitlements entitlements.plist --sign "$ID" "$APP"
-          codesign --verify --strict --verbose=2 "$APP"
       - name: Launch test (app starts and drag & drop loads)
         run: |
           $PY - <<'EOF'
@@ -98,21 +75,20 @@ jobs:
               assert 'unavailable' not in err and 'Traceback' not in err, err
               print('app ran for 8s with no errors')
           EOF
-      - name: Build .dmg
+      - name: Build .pkg (ad-hoc signs the app on the user's Mac)
         run: |
-          mkdir dmg && cp -R "dist/OTW PTX.app" dmg/ && ln -s /Applications dmg/Applications
-          hdiutil create -volname "OTW PTX" -srcfolder dmg -ov -format UDZO "OTW-PTX-$VERSION-mac.dmg"
-      - name: Notarize .dmg
-        if: env.APPLE_CERT_P12_BASE64 != ''
-        run: |
-          codesign --force --timestamp --sign "$SIGN_ID" "OTW-PTX-$VERSION-mac.dmg"
-          xcrun notarytool submit "OTW-PTX-$VERSION-mac.dmg" --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-          xcrun stapler staple "OTW-PTX-$VERSION-mac.dmg"
+          mkdir pkgroot && cp -R "dist/OTW PTX.app" pkgroot/
+          pkgbuild --analyze --root pkgroot comp.plist
+          # always install to /Applications, never "update" another copy (or the user's own Python) elsewhere
+          plutil -convert json -o - comp.plist | sed 's/"BundleIsRelocatable":true/"BundleIsRelocatable":false/g' > comp.json
+          plutil -convert xml1 -o comp.plist comp.json
+          pkgbuild --root pkgroot --component-plist comp.plist --install-location /Applications \
+            --scripts pkg-scripts --identifier com.otw.ptx --version "$VERSION" "OTW-PTX-$VERSION-mac.pkg"
+          pkgutil --payload-files "OTW-PTX-$VERSION-mac.pkg" | head -3
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: OTW-PTX-*-mac.dmg
+          path: OTW-PTX-*-mac.pkg
 
   release:
     if: github.event_name == 'push' || inputs.release
@@ -128,4 +104,4 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: |
             windows/*.exe
-            macos/*.dmg
+            macos/*.pkg

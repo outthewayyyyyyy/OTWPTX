@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs as root after install: ad-hoc sign the app on this Mac and clear any download flag.
+APP="$2/OTW PTX.app"
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null
+codesign --force --deep --sign - "$APP"
+exit 0
