@@ -69,6 +69,10 @@ Every push to `main` builds both installers in GitHub Actions and publishes them
 | `installer.iss` | Windows installer |
 | `pkg-scripts/postinstall` | Ad-hoc signs the app on the user's Mac after install |
 
+## License
+
+Free and open source under the [GNU Lesser General Public License v2.1 or later](LICENSE) (LGPL-2.1-or-later).
+
 ## Credits
 
 `.ptx` decryption is ported from [ptformat](https://github.com/zamaudio/ptformat) (LGPL-2.1+). Pro Tools is a trademark of Avid Technology; this project isn't affiliated with Avid.
