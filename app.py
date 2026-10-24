@@ -13,7 +13,8 @@ APP = 'OTW PTX'
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
     root = TkinterDnD.Tk()
-except Exception:  # drag & drop unavailable: the button still works
+except Exception as e:  # drag & drop unavailable: the button still works
+    print('drag & drop unavailable:', e, file=sys.stderr)
     DND_FILES, root = None, tk.Tk()
 
 root.title(APP)

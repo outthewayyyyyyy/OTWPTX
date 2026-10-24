@@ -1,0 +1,117 @@
+# Manual only: runs when you click "Run workflow" on the Actions tab,
+# never on push, so commits cost nothing.
+name: Build installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version number (e.g. 1.0.0)
+        required: true
+        default: 0.1.0
+      release:
+        description: Publish a GitHub Release with the installers
+        type: boolean
+        default: false
+
+env:
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build app
+        shell: bash
+        run: |
+          pip install -r requirements.txt
+          pyinstaller --noconfirm --windowed --onedir --name "OTW PTX" --collect-all tkinterdnd2 app.py
+      - name: Build installer
+        shell: bash
+        run: |
+          choco install innosetup --no-progress -y
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //DMyAppVersion=$VERSION installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: Output/*.exe
+
+  macos:
+    runs-on: macos-15
+    env:
+      APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install universal2 Python from python.org
+        run: |
+          curl -sSLo py.pkg https://www.python.org/ftp/python/3.13.9/python-3.13.9-macos11.pkg
+          sudo installer -pkg py.pkg -target /
+          echo "PY=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3" >> $GITHUB_ENV
+      - name: Build app (Intel + Apple Silicon)
+        run: |
+          $PY -m venv venv && . venv/bin/activate
+          pip install -r requirements.txt
+          pyinstaller --noconfirm --windowed --onedir --name "OTW PTX" --collect-all tkinterdnd2 \
+            --target-arch universal2 --osx-bundle-identifier com.otw.ptx app.py
+          P="dist/OTW PTX.app/Contents/Info.plist"
+          plutil -replace CFBundleShortVersionString -string "$VERSION" "$P"
+          plutil -replace CFBundleVersion -string "$VERSION" "$P"
+          plutil -insert CFBundleDocumentTypes -json '[{"CFBundleTypeName":"Pro Tools Session","CFBundleTypeRole":"Viewer","CFBundleTypeExtensions":["ptx"]}]' "$P"
+          lipo -archs "dist/OTW PTX.app/Contents/MacOS/OTW PTX"
+      - name: Sign app
+        if: env.APPLE_CERT_P12_BASE64 != ''
+        run: |
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > cert.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security import cert.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci build.keychain
+          ID=$(security find-identity -v -p codesigning build.keychain | grep -o '"Developer ID Application[^"]*"' | head -1 | tr -d '"')
+          echo "SIGN_ID=$ID" >> $GITHUB_ENV
+          APP="dist/OTW PTX.app"
+          # sign every library inside first, then the app itself
+          find "$APP" -type f \( -name '*.dylib' -o -name '*.so' \) -exec \
+            codesign --force --timestamp --options runtime --sign "$ID" {} \;
+          codesign --force --timestamp --options runtime --entitlements entitlements.plist --sign "$ID" "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+      - name: Build .dmg
+        run: |
+          mkdir dmg && cp -R "dist/OTW PTX.app" dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname "OTW PTX" -srcfolder dmg -ov -format UDZO "OTW-PTX-$VERSION-mac.dmg"
+      - name: Notarize .dmg
+        if: env.APPLE_CERT_P12_BASE64 != ''
+        run: |
+          codesign --force --timestamp --sign "$SIGN_ID" "OTW-PTX-$VERSION-mac.dmg"
+          xcrun notarytool submit "OTW-PTX-$VERSION-mac.dmg" --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "OTW-PTX-$VERSION-mac.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: OTW-PTX-*-mac.dmg
+
+  release:
+    if: inputs.release
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            windows/*.exe
+            macos/*.dmg
