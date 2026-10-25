@@ -2,6 +2,8 @@
 
 **Send your Pro Tools session to a mix engineer in one zip.**
 
+Made by **[Out The Way](https://outtheway.net)** · [outtheway.net](https://outtheway.net)
+
 Drop in a Pro Tools session (`.ptx`) and OTW PTX packs everything the engineer needs into a single zip:
 
 - the session file
@@ -68,6 +70,10 @@ Every push to `main` builds both installers in GitHub Actions and publishes them
 | `.github/workflows/build.yml` | Builds the Mac and Windows installers |
 | `installer.iss` | Windows installer |
 | `pkg-scripts/postinstall` | Ad-hoc signs the app on the user's Mac after install |
+
+## More from Out The Way
+
+Find more tools and work at **[outtheway.net](https://outtheway.net)**.
 
 ## License
 
